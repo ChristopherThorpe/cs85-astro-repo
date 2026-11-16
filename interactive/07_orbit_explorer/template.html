@@ -1,0 +1,942 @@
+<title>Sentry Orbit Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a mission-console split. Map + timeline on the left, the object list on the right;
+   they stack into one column on phones. Colours: cool neutrals, one blue ramp for risk,
+   categorical hues only for objects you select. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --plot-bg: #fbfcfd;
+  --ink: #111922;
+  --ink-2: #46515e;
+  --ink-3: #6a7584;
+  --line: #d6dce4;
+  --grid: #e4e9ef;
+  --accent: #1d5fb8;
+  --accent-ink: #ffffff;
+  --moon: #8a939e;
+  --sun: #b07800;
+  /* risk ramp (one hue, light = unlikely, dark = more likely) */
+  --risk-0: #86b6ef; --risk-1: #3987e5; --risk-2: #1c5cab; --risk-3: #0d366b;
+  --removed: #a3abb5;
+  /* identity colours for selected objects (categorical slots 2-8) */
+  --cat-1: #eb6834; --cat-2: #1baf7a; --cat-3: #eda100; --cat-4: #e87ba4;
+  --cat-5: #008300; --cat-6: #6250d6; --cat-7: #e34948;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-head: "IBM Plex Sans Condensed", "IBM Plex Sans", "Arial Narrow", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1116; --surface: #141a21; --plot-bg: #0a0e13; --ink: #e8edf2; --ink-2: #b3bdc8;
+    --ink-3: #8794a2; --line: #29323d; --grid: #1f2731; --accent: #7fb0ff; --accent-ink: #0d1116;
+    --moon: #a9b2bc; --sun: #e0b14a;
+    --risk-0: #184f95; --risk-1: #2a78d6; --risk-2: #6da7ec; --risk-3: #cde2fb; --removed: #5d6670;
+    --cat-1: #d95926; --cat-2: #199e70; --cat-3: #c98500; --cat-4: #d55181;
+    --cat-5: #0ca30c; --cat-6: #9085e9; --cat-7: #e66767;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1116; --surface: #141a21; --plot-bg: #0a0e13; --ink: #e8edf2; --ink-2: #b3bdc8;
+  --ink-3: #8794a2; --line: #29323d; --grid: #1f2731; --accent: #7fb0ff; --accent-ink: #0d1116;
+  --moon: #a9b2bc; --sun: #e0b14a;
+  --risk-0: #184f95; --risk-1: #2a78d6; --risk-2: #6da7ec; --risk-3: #cde2fb; --removed: #5d6670;
+  --cat-1: #d95926; --cat-2: #199e70; --cat-3: #c98500; --cat-4: #d55181;
+  --cat-5: #0ca30c; --cat-6: #9085e9; --cat-7: #e66767;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 32px;
+}
+h1, h2, h3 { font-family: var(--font-head); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 1.6rem; letter-spacing: 0.01em; }
+h2 { font-size: 1.1rem; }
+h3 { font-size: 1rem; }
+p { margin: 0; }
+a { color: var(--accent); }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); font-weight: 600; }
+
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; max-width: 1500px; margin: 0 auto 14px; }
+.top p { color: var(--ink-2); max-width: 70ch; }
+
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 18px; max-width: 1500px; margin: 0 auto; align-items: start; }
+.stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+
+.stage-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.clock { display: flex; flex-direction: column; align-items: flex-end; }
+.clock .when { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 500; letter-spacing: 0.02em; }
+.clock .rel { font-size: 0.8rem; color: var(--ink-3); }
+
+.plot-wrap { position: relative; padding: 4px; }
+#plot { width: 100%; height: min(74vh, 760px); min-height: 340px; }
+.view-note { position: absolute; left: 14px; top: 10px; font-size: 0.78rem; color: var(--ink-3); max-width: 24ch; pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 12px 10px; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+
+.timeline { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+#strip { width: 100%; height: 78px; display: block; cursor: pointer; touch-action: none; }
+input[type="range"]#time { width: 100%; margin: 0; accent-color: var(--accent); height: 22px; }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.controls .group { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 5px 9px; cursor: pointer; font-size: 0.82rem; white-space: nowrap; }
+.btn:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); min-width: 78px; font-weight: 600; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.controls label { font-size: 0.82rem; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: center; }
+.controls select, .controls input[type="date"] { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 4px 6px; font-size: 0.82rem; }
+.strip-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.76rem; color: var(--ink-3); }
+
+.detail { padding: 14px 16px; display: grid; gap: 10px; }
+.detail-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; justify-content: space-between; }
+.detail-head h2 { display: flex; align-items: center; gap: 8px; font-size: 1.25rem; }
+.pill { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 18px; margin: 0; }
+.facts div { min-width: 0; }
+.facts dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); font-weight: 600; }
+.facts dd { margin: 2px 0 0; }
+.facts .big { font-family: var(--font-mono); font-size: 1.05rem; }
+.detail .explain { color: var(--ink-2); max-width: 80ch; }
+.detail .links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; }
+
+/* object list */
+.panel { position: sticky; top: max(12px, env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; max-height: calc(100vh - 24px); min-width: 0; }
+.panel-head { padding: 12px 12px 10px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
+.panel-head .row1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.count { font-size: 0.8rem; color: var(--ink-3); }
+.panel-head input[type="search"] { width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 7px 9px; }
+.panel-head .row3 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.panel-head select { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 4px 6px; font-size: 0.82rem; }
+.switch { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; color: var(--ink-2); cursor: pointer; }
+.cols, .row { display: grid; grid-template-columns: 22px 12px minmax(0, 1fr) 76px 104px; gap: 8px; align-items: center; }
+.cols { padding: 6px 12px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); font-weight: 600; border-bottom: 1px solid var(--line); }
+.cols .r, .row .pct { text-align: right; }
+.list { overflow-y: auto; overscroll-behavior: contain; min-height: 200px; }
+.group-label { padding: 8px 12px 4px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); font-weight: 600; background: var(--bg); border-bottom: 1px solid var(--line); }
+.row { padding: 5px 12px; border-bottom: 1px solid var(--grid); }
+.row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.row.focused { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.row input { margin: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+.row .name { border: 0; background: none; padding: 0; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.row .name:hover { text-decoration: underline; }
+.row .pct { font-family: var(--font-mono); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.row .jump { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 2px 6px; cursor: pointer; font-family: var(--font-mono); font-size: 0.76rem; text-align: right; white-space: nowrap; }
+.row .jump:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.row .jump:disabled { cursor: not-allowed; color: var(--ink-3); }
+.swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.row.sel .swatch { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink); }
+.empty { padding: 16px 12px; color: var(--ink-3); }
+
+.notes { max-width: 1500px; margin: 18px auto 0; padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px 28px; }
+.notes section { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.notes p, .notes li { color: var(--ink-2); }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+@media (max-width: 960px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .panel { position: static; max-height: none; }
+  .list { max-height: 65vh; }
+  #plot { height: min(100vw, 70vh); }
+}
+@media (max-width: 480px) {
+  .cols, .row { grid-template-columns: 20px 12px minmax(0, 1fr) 64px 96px; gap: 6px; }
+  .clock { align-items: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<header class="top">
+  <h1>Sentry Orbit Explorer</h1>
+  <p>Every asteroid on NASA/JPL's Sentry impact-risk list, shown around Earth and the Moon for any moment from 2000 to 2130. Pick objects on the right to follow them or jump to their most likely possible impact date.</p>
+</header>
+
+<main class="app">
+  <section class="stage" aria-label="Map and timeline">
+    <div class="card">
+      <div class="stage-bar">
+        <div class="seg" role="group" aria-label="Map view">
+          <button type="button" id="view-near" aria-pressed="true">Near Earth</button>
+          <button type="button" id="view-helio" aria-pressed="false">Inner solar system</button>
+        </div>
+        <div class="clock" aria-live="polite">
+          <span class="when" id="when">-</span>
+          <span class="rel" id="when-rel">-</span>
+        </div>
+      </div>
+      <div class="plot-wrap">
+        <div id="plot" role="img" aria-label="Map of asteroid positions"></div>
+        <p class="view-note" id="view-note"></p>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="card timeline">
+      <canvas id="strip" aria-label="Timeline from 2000 to 2130. Click to move in time."></canvas>
+      <input type="range" id="time" min="0" max="1" step="1" aria-label="Date and time">
+      <div class="controls">
+        <div class="group">
+          <button class="btn" type="button" data-step="-365.25">−1 yr</button>
+          <button class="btn" type="button" data-step="-30.4375">−1 mo</button>
+          <button class="btn" type="button" data-step="-1">−1 d</button>
+          <button class="btn" type="button" data-step="-0.041666666666666664">−1 h</button>
+        </div>
+        <button class="btn primary" type="button" id="play">▶ Play</button>
+        <div class="group">
+          <button class="btn" type="button" data-step="0.041666666666666664">+1 h</button>
+          <button class="btn" type="button" data-step="1">+1 d</button>
+          <button class="btn" type="button" data-step="30.4375">+1 mo</button>
+          <button class="btn" type="button" data-step="365.25">+1 yr</button>
+        </div>
+        <label for="speed">Speed
+          <select id="speed">
+            <option value="0.041666666666666664">1 hour per second</option>
+            <option value="1">1 day per second</option>
+            <option value="7" selected>1 week per second</option>
+            <option value="30.4375">1 month per second</option>
+            <option value="365.25">1 year per second</option>
+          </select>
+        </label>
+        <button class="btn" type="button" id="today">Today</button>
+        <label for="date-input">Go to
+          <input type="date" id="date-input" min="2000-01-01" max="2130-12-31">
+        </label>
+      </div>
+      <div class="strip-legend" id="strip-legend"></div>
+    </div>
+
+    <article class="card detail" id="detail" aria-live="polite"></article>
+  </section>
+
+  <aside class="card panel" aria-label="Objects">
+    <div class="panel-head">
+      <div class="row1"><h2>Objects</h2><span class="count" id="count"></span></div>
+      <input type="search" id="search" placeholder="Search by name, e.g. Bennu or 2010 RF12" aria-label="Search objects">
+      <div class="row3">
+        <label class="switch" for="only-selected"><input type="checkbox" id="only-selected"> Map shows selected only</label>
+        <button class="btn" type="button" id="clear">Clear selection</button>
+      </div>
+      <label class="switch" for="sort">Sort by
+        <select id="sort">
+          <option value="ip">Highest impact chance</option>
+          <option value="date">Soonest possible impact</option>
+          <option value="ps">Palermo scale</option>
+          <option value="size">Largest size</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+    </div>
+    <div class="cols" aria-hidden="true"><span></span><span></span><span>Name</span><span class="r">Max chance</span><span class="r">Date</span></div>
+    <div class="list" id="list" role="list"></div>
+  </aside>
+</main>
+
+<footer class="card notes" id="notes"></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.0/plotly.min.js"></script>
+<script type="application/json" id="explorer-data">/*__EXPLORER_DATA__*/</script>
+<script>
+(() => {
+'use strict';
+
+/* ------------------------------------------------------------------ data */
+const RAW = JSON.parse(document.getElementById('explorer-data').textContent);
+const META = RAW.meta;
+const OBJ = RAW.objects;
+const N = OBJ.length;
+
+function decode(text, Type) {           // base64 text -> typed array (little-endian numbers)
+  const bin = atob(text);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Type(bytes.buffer);
+}
+const segStart = decode(RAW.seg_start, Int32Array);
+const segT = decode(RAW.seg_t, Float32Array);
+const segEl = decode(RAW.seg_el, Float32Array);
+const earthXYZ = decode(RAW.earth.xyz, Float32Array);   // heliocentric, au, every 4 days
+const moonXYZ = decode(RAW.moon.xyz, Float32Array);     // from Earth, lunar distances, daily
+const viObj = decode(RAW.vi.obj, Uint16Array), viT = decode(RAW.vi.t, Float32Array), viIp = decode(RAW.vi.ip, Float32Array);
+const cadObj = decode(RAW.cad.obj, Uint16Array), cadT = decode(RAW.cad.t, Float32Array), cadLd = decode(RAW.cad.ld, Float32Array);
+
+const AU_LD = META.au_km / META.ld_km;
+const TWO_PI = 2 * Math.PI;
+const DEG = 180 / Math.PI;
+const RMIN = 0.03, RMAX = 2500;         // map range in lunar distances (log scale)
+const HOUR = 1 / 24;
+
+/* ------------------------------------------------------------------ orbit maths */
+// Each asteroid's path is a chain of Kepler ellipses ("segments"), computed in step 2
+// from a full gravity simulation. Here we find the right segment and solve Kepler's equation.
+const segCache = new Int32Array(N);
+for (let k = 0; k < N; k++) segCache[k] = segStart[k];
+
+function segmentAt(k, t) {
+  const lo = segStart[k], hi = segStart[k + 1] - 1;
+  const s = segCache[k];
+  if (segT[s] <= t && (s === hi || segT[s + 1] > t)) return s;
+  let a = lo, b = hi;
+  while (a < b) { const m = (a + b + 1) >> 1; if (segT[m] <= t) a = m; else b = m - 1; }
+  segCache[k] = a;
+  return a;
+}
+
+function helioFromSegment(s, t, out) {
+  const o = s * 6;
+  const a = segEl[o], e = segEl[o + 1], inc = segEl[o + 2], om = segEl[o + 3], w = segEl[o + 4], M0 = segEl[o + 5];
+  const n = Math.sqrt(META.mu_sun / (a * a * a));
+  let M = (M0 + n * (t - segT[s])) % TWO_PI;
+  if (M < 0) M += TWO_PI;
+  let E = e > 0.8 ? Math.PI : M;
+  for (let i = 0; i < 30; i++) {
+    const d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    E -= d;
+    if (Math.abs(d) < 1e-13) break;
+  }
+  const x = a * (Math.cos(E) - e), y = a * Math.sqrt(1 - e * e) * Math.sin(E);
+  const cO = Math.cos(om), sO = Math.sin(om), ci = Math.cos(inc), si = Math.sin(inc), cw = Math.cos(w), sw = Math.sin(w);
+  out[0] = x * (cO * cw - sO * sw * ci) + y * (-cO * sw - sO * cw * ci);
+  out[1] = x * (sO * cw + cO * sw * ci) + y * (-sO * sw + cO * cw * ci);
+  out[2] = x * (sw * si) + y * (cw * si);
+  return out;
+}
+const helio = (k, t, out) => helioFromSegment(segmentAt(k, t), t, out);
+
+// Smooth 4-point interpolation between the stored Earth / Moon samples
+function interp(arr, t0, step, t, out) {
+  const x = (t - t0) / step, nS = arr.length / 3;
+  const i = Math.max(0, Math.min(nS - 4, Math.floor(x) - 1));
+  const u = x - i;
+  const w0 = -(u - 1) * (u - 2) * (u - 3) / 6, w1 = u * (u - 2) * (u - 3) / 2;
+  const w2 = -u * (u - 1) * (u - 3) / 2, w3 = u * (u - 1) * (u - 2) / 6;
+  for (let c = 0; c < 3; c++) {
+    out[c] = w0 * arr[3 * i + c] + w1 * arr[3 * (i + 1) + c] + w2 * arr[3 * (i + 2) + c] + w3 * arr[3 * (i + 3) + c];
+  }
+  return out;
+}
+const earthAt = (t, out) => interp(earthXYZ, RAW.earth.t0, RAW.earth.step, t, out);
+const moonAt = (t, out) => interp(moonXYZ, RAW.moon.t0, RAW.moon.step, t, out);
+
+/* ------------------------------------------------------------------ formatting */
+const JD_UNIX = 2440587.5;
+function tToDate(t) { return new Date((META.jd0 + t - JD_UNIX) * 86400000); }
+function dateToT(d) { return d.getTime() / 86400000 + JD_UNIX - META.jd0; }
+function fmtDateTime(t) { const s = tToDate(t).toISOString(); return s.slice(0, 10) + ' ' + s.slice(11, 16) + ' UTC'; }
+function fmtDate(t) { return tToDate(t).toISOString().slice(0, 10); }
+const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+function fmtPct(p) {
+  if (p == null) return '–';
+  const pct = p * 100;
+  if (pct >= 0.01) return (pct >= 1 ? pct.toPrecision(2) : pct.toPrecision(2)) + '%';
+  const exp = Math.floor(Math.log10(pct));
+  const man = pct / Math.pow(10, exp);
+  return man.toFixed(1) + '×10' + String(exp).split('').map(c => SUP[c]).join('') + '%';
+}
+function fmtOneIn(p) {
+  if (!p) return '';
+  const n = 1 / p;
+  if (n < 1000) return '1 in ' + Math.round(n).toLocaleString('en-US');
+  const units = [[1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
+  for (const [v, w] of units) if (n >= v) return '1 in ' + (n / v).toPrecision(2).replace(/\.0+$/, '') + ' ' + w;
+  return '';
+}
+function fmtLd(ld) {
+  const km = ld * META.ld_km;
+  const kmText = km < 1e6 ? Math.round(km / 100) * 100 : null;
+  const ldText = ld < 10 ? ld.toPrecision(2) : Math.round(ld).toLocaleString('en-US');
+  if (kmText !== null) return `${ldText} LD (${kmText.toLocaleString('en-US')} km)`;
+  return `${ldText} LD (${(km / 1e6).toPrecision(km < 1e7 ? 2 : 3)} million km)`;
+}
+function fmtKm(km) { return km < 1e6 ? `${Math.round(km / 100) * 100 > 0 ? (Math.round(km / 100) * 100).toLocaleString('en-US') : Math.round(km).toLocaleString('en-US')} km` : `${(km / 1e6).toPrecision(3)} million km`; }
+function fmtSize(km) {
+  if (km == null) return 'unknown';
+  const m = km * 1000;
+  return m < 1000 ? `about ${m < 20 ? m.toFixed(0) : Math.round(m / 5) * 5} m` : `about ${km.toPrecision(2)} km`;
+}
+function shortName(o) { return o.name.replace(/^\((.*)\)$/, '$1'); }
+function fmtRel(t) {
+  const d = t - META.today_t, a = Math.abs(d);
+  if (a < 1) return a < HOUR ? 'now' : `${Math.round(a * 24)} hours ${d < 0 ? 'ago' : 'from now'}`;
+  if (a < 60) return `${Math.round(a)} days ${d < 0 ? 'ago' : 'from now'}`;
+  if (a < 730) return `${Math.round(a / 30.4375)} months ${d < 0 ? 'ago' : 'from now'}`;
+  return `${(a / 365.25).toFixed(1)} years ${d < 0 ? 'ago' : 'from now'}`;
+}
+const U_TEXT = ['very well known', 'very well known', 'well known', 'well known', 'fairly well known',
+                'uncertain', 'uncertain', 'very uncertain', 'very uncertain', 'extremely uncertain'];
+
+/* ------------------------------------------------------------------ per-object facts */
+OBJ.forEach((o, k) => {
+  o.k = k;
+  o.label = shortName(o);
+  o.search = (o.name + ' ' + o.des).toLowerCase().replace(/\s+/g, '');
+  if (o.featured) {
+    o.band = 'removed';
+    const best = (o.approaches || []).slice().sort((a, b) => a.dist_km - b.dist_km)[0];
+    o.jumpT = best ? best.t : null;
+    o.jumpLabel = best ? best.date.slice(0, 11) : '';
+  } else {
+    const p = o.ip_max || 0;
+    o.band = p >= 1e-3 ? 3 : p >= 1e-5 ? 2 : p >= 1e-7 ? 1 : 0;
+    o.jumpT = o.vi_t;
+    o.jumpLabel = o.vi_date ? o.vi_date.slice(0, 10) : '';
+  }
+  o.inRange = o.jumpT != null && o.jumpT >= META.t_min && o.jumpT <= META.t_max;
+  const m = (o.diam_km || 0.01) * 1000;
+  o.size = Math.max(4, Math.min(13, 3 + 2.2 * Math.log10(m)));
+});
+const SENTRY = OBJ.filter(o => !o.featured);
+const FEATURED = OBJ.filter(o => o.featured);
+
+/* ------------------------------------------------------------------ state */
+const SLOTS = 7;
+const state = {
+  t: Math.min(META.t_max, Math.max(META.t_min, META.today_t)),
+  view: 'near', onlySelected: false, focus: null, playing: false, rate: 7,
+  selected: new Map(),       // object index -> colour slot (or -1 when all slots are taken)
+};
+function select(k, on) {
+  if (on && !state.selected.has(k)) {
+    const used = new Set(state.selected.values());
+    let slot = -1;
+    for (let s = 0; s < SLOTS; s++) if (!used.has(s)) { slot = s; break; }
+    state.selected.set(k, slot);
+  } else if (!on) state.selected.delete(k);
+}
+
+/* ------------------------------------------------------------------ colours from CSS tokens */
+let C = {};
+function readColours() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = name => cs.getPropertyValue(name).trim();
+  C = {
+    bg: v('--bg'), surface: v('--surface'), plotBg: v('--plot-bg'), ink: v('--ink'), ink2: v('--ink-2'),
+    ink3: v('--ink-3'), line: v('--line'), grid: v('--grid'), accent: v('--accent'), moon: v('--moon'), sun: v('--sun'),
+    risk: [v('--risk-0'), v('--risk-1'), v('--risk-2'), v('--risk-3')], removed: v('--removed'),
+    cat: Array.from({ length: SLOTS }, (_, i) => v(`--cat-${i + 1}`)),
+    font: v('--font-body'), mono: v('--font-mono'),
+  };
+}
+function colourOf(o) {
+  if (state.selected.has(o.k)) { const s = state.selected.get(o.k); return s >= 0 ? C.cat[s] : C.ink; }
+  return o.band === 'removed' ? C.removed : C.risk[o.band];
+}
+
+/* ------------------------------------------------------------------ positions for the current time */
+const pos = { r: new Float64Array(N), theta: new Float64Array(N), hx: new Float64Array(N), hy: new Float64Array(N),
+              moonLd: new Float64Array(N), earth: [0, 0, 0], moon: [0, 0, 0], sunLon: 0 };
+const tmp = [0, 0, 0];
+function computePositions(t) {
+  earthAt(t, pos.earth);
+  moonAt(t, pos.moon);
+  pos.sunLon = Math.atan2(-pos.earth[1], -pos.earth[0]);
+  const [ex, ey, ez] = pos.earth;
+  for (let k = 0; k < N; k++) {
+    helio(k, t, tmp);
+    const gx = tmp[0] - ex, gy = tmp[1] - ey, gz = tmp[2] - ez;
+    pos.r[k] = Math.sqrt(gx * gx + gy * gy + gz * gz) * AU_LD;
+    pos.theta[k] = (Math.atan2(gy, gx) - pos.sunLon) * DEG;
+    pos.hx[k] = tmp[0]; pos.hy[k] = tmp[1];
+    const mx = gx * AU_LD - pos.moon[0], my = gy * AU_LD - pos.moon[1], mz = gz * AU_LD - pos.moon[2];
+    pos.moonLd[k] = Math.sqrt(mx * mx + my * my + mz * mz);
+  }
+}
+function geoTrack(k, t) {       // geocentric (r in LD, theta in degrees) at time t, for trails
+  helio(k, t, tmp);
+  const e = earthAt(t, [0, 0, 0]);
+  const sunLon = Math.atan2(-e[1], -e[0]);
+  const gx = tmp[0] - e[0], gy = tmp[1] - e[1], gz = tmp[2] - e[2];
+  return [Math.max(RMIN, Math.sqrt(gx * gx + gy * gy + gz * gz) * AU_LD), (Math.atan2(gy, gx) - sunLon) * DEG];
+}
+
+/* ------------------------------------------------------------------ the map */
+const plotEl = document.getElementById('plot');
+let plotReady = false;
+
+function ring(r, n = 181) {
+  const th = Array.from({ length: n }, (_, i) => i * 360 / (n - 1));
+  return { r: th.map(() => r), theta: th };
+}
+const RINGS = [
+  { r: 42164 / 384400, label: 'geostationary satellites', dash: 'dot' },
+  { r: 1, label: 'Moon’s orbit', dash: 'dot' },
+  { r: 0.05 * 149597870.7 / 384400, label: '0.05 au: “close approach” limit', dash: 'dash' },
+  { r: 149597870.7 / 384400, label: '1 au: Earth–Sun distance', dash: 'dash' },
+];
+
+function visibleObjects() {
+  if (state.onlySelected) return [...state.selected.keys()].map(k => OBJ[k]);
+  return OBJ;
+}
+
+function nearTraces() {
+  const traces = [];
+  for (const g of RINGS) {
+    const rr = ring(g.r);
+    traces.push({ type: 'scatterpolar', mode: 'lines', r: rr.r, theta: rr.theta, hoverinfo: 'skip',
+                  line: { color: C.ink3, width: 1, dash: g.dash }, opacity: 0.55, showlegend: false });
+  }
+  traces.push({ type: 'scatterpolar', mode: 'text', r: RINGS.map(g => g.r), theta: RINGS.map(() => 212),
+                text: RINGS.map(g => g.label), textposition: 'bottom center', hoverinfo: 'skip', showlegend: false,
+                textfont: { color: C.ink3, size: 10, family: C.font } });
+  traces.push({ type: 'scatterpolar', mode: 'text', r: [RMAX * 0.55], theta: [0], text: ['↑ toward the Sun'],
+                textposition: 'middle center', hoverinfo: 'skip', showlegend: false, textfont: { color: C.sun, size: 11, family: C.font } });
+
+  // all (unselected) objects as one fast WebGL layer
+  const pop = visibleObjects().filter(o => !state.selected.has(o.k));
+  traces.push({
+    type: 'scatterpolargl', mode: 'markers', name: 'objects',
+    r: pop.map(o => Math.max(RMIN, pos.r[o.k])), theta: pop.map(o => pos.theta[o.k]),
+    customdata: pop.map(o => o.k), text: pop.map(o => o.label),
+    marker: { color: pop.map(colourOf), size: pop.map(o => o.size), opacity: 0.85, line: { width: 0 } },
+    hovertemplate: '<b>%{text}</b><br>%{r:.3~g} LD from Earth<extra></extra>', showlegend: false,
+  });
+
+  // trails (±15 days) and markers for selected objects
+  const sel = [...state.selected.keys()];
+  for (const k of sel) {
+    const rr = [], th = [];
+    for (let d = -15; d <= 15; d += 0.25) {
+      const tt = state.t + d;
+      if (tt < META.t_min || tt > META.t_max) continue;
+      const [r, theta] = geoTrack(k, tt);
+      rr.push(r); th.push(theta);
+    }
+    traces.push({ type: 'scatterpolar', mode: 'lines', r: rr, theta: th, hoverinfo: 'skip', showlegend: false,
+                  line: { color: colourOf(OBJ[k]), width: 1.5 }, opacity: 0.6 });
+  }
+  traces.push({
+    type: 'scatterpolar', mode: 'markers+text', name: 'selected',
+    r: sel.map(k => Math.max(RMIN, pos.r[k])), theta: sel.map(k => pos.theta[k]),
+    customdata: sel, text: sel.map(k => OBJ[k].label), textposition: 'top center',
+    textfont: { color: C.ink, size: 11, family: C.font },
+    marker: { color: sel.map(k => colourOf(OBJ[k])), size: sel.map(k => OBJ[k].size + 5), line: { color: C.plotBg, width: 2 } },
+    hovertemplate: '<b>%{text}</b><br>%{r:.3~g} LD from Earth<extra></extra>', showlegend: false,
+  });
+
+  // Moon and Earth
+  const m = pos.moon, mr = Math.hypot(m[0], m[1], m[2]);
+  traces.push({ type: 'scatterpolar', mode: 'markers+text', r: [mr], theta: [(Math.atan2(m[1], m[0]) - pos.sunLon) * DEG],
+                text: ['Moon'], textposition: 'bottom center', textfont: { color: C.ink2, size: 11, family: C.font },
+                marker: { color: C.moon, size: 10, line: { color: C.plotBg, width: 1.5 } },
+                hovertemplate: `Moon<br>${mr.toFixed(3)} LD from Earth<extra></extra>`, showlegend: false });
+  traces.push({ type: 'scatterpolar', mode: 'markers+text', r: [RMIN], theta: [0], text: ['Earth'],
+                textposition: 'bottom center', textfont: { color: C.ink, size: 12, family: C.font },
+                marker: { color: C.accent, size: 14, line: { color: C.plotBg, width: 2 } },
+                hovertemplate: 'Earth<extra></extra>', showlegend: false });
+  return traces;
+}
+
+function nearLayout() {
+  return {
+    paper_bgcolor: C.surface, plot_bgcolor: C.surface, margin: { l: 20, r: 20, t: 20, b: 20 },
+    font: { family: C.font, color: C.ink2, size: 11 }, showlegend: false, dragmode: false,
+    uirevision: 'near', hoverlabel: { bgcolor: C.surface, bordercolor: C.line, font: { color: C.ink, family: C.font } },
+    polar: {
+      bgcolor: C.plotBg,
+      radialaxis: { type: 'log', range: [Math.log10(RMIN), Math.log10(RMAX)], tickvals: [0.1, 1, 10, 100, 1000],
+                    ticktext: ['0.1 LD', '1 LD', '10 LD', '100 LD', '1000 LD'], angle: 30, tickangle: 30,
+                    gridcolor: C.grid, linecolor: C.line, tickfont: { color: C.ink3, size: 10, family: C.mono }, showline: false },
+      angularaxis: { rotation: 90, direction: 'counterclockwise', showticklabels: false, ticks: '',
+                     gridcolor: C.grid, linecolor: C.line, dtick: 30 },
+    },
+  };
+}
+
+function helioTraces() {
+  const traces = [];
+  // Earth's orbit: its positions over the surrounding year
+  const ex = [], ey = [];
+  for (let d = -183; d <= 183; d += 3) { const e = earthAt(Math.min(META.t_max, Math.max(META.t_min, state.t + d)), [0, 0, 0]); ex.push(e[0]); ey.push(e[1]); }
+  traces.push({ type: 'scatter', mode: 'lines', x: ex, y: ey, hoverinfo: 'skip', line: { color: C.ink3, width: 1, dash: 'dot' }, showlegend: false });
+
+  const pop = visibleObjects().filter(o => !state.selected.has(o.k));
+  traces.push({ type: 'scattergl', mode: 'markers', x: pop.map(o => pos.hx[o.k]), y: pop.map(o => pos.hy[o.k]),
+                customdata: pop.map(o => o.k), text: pop.map(o => o.label),
+                marker: { color: pop.map(colourOf), size: pop.map(o => o.size), opacity: 0.85, line: { width: 0 } },
+                hovertemplate: '<b>%{text}</b><extra></extra>', showlegend: false });
+
+  // full current orbit ellipse for each selected object
+  const sel = [...state.selected.keys()];
+  for (const k of sel) {
+    const s = segmentAt(k, state.t), o = s * 6;
+    const a = segEl[o], period = TWO_PI / Math.sqrt(META.mu_sun / (a * a * a));
+    const xs = [], ys = [];
+    for (let i = 0; i <= 160; i++) { helioFromSegment(s, state.t + period * i / 160, tmp); xs.push(tmp[0]); ys.push(tmp[1]); }
+    traces.push({ type: 'scatter', mode: 'lines', x: xs, y: ys, hoverinfo: 'skip', showlegend: false,
+                  line: { color: colourOf(OBJ[k]), width: 1.5 }, opacity: 0.7 });
+  }
+  traces.push({ type: 'scatter', mode: 'markers+text', x: sel.map(k => pos.hx[k]), y: sel.map(k => pos.hy[k]),
+                customdata: sel, text: sel.map(k => OBJ[k].label), textposition: 'top center',
+                textfont: { color: C.ink, size: 11, family: C.font },
+                marker: { color: sel.map(k => colourOf(OBJ[k])), size: sel.map(k => OBJ[k].size + 5), line: { color: C.plotBg, width: 2 } },
+                hovertemplate: '<b>%{text}</b><extra></extra>', showlegend: false });
+  traces.push({ type: 'scatter', mode: 'markers+text', x: [0], y: [0], text: ['Sun'], textposition: 'bottom center',
+                textfont: { color: C.ink2, size: 11 }, marker: { color: C.sun, size: 16 }, hoverinfo: 'skip', showlegend: false });
+  traces.push({ type: 'scatter', mode: 'markers+text', x: [pos.earth[0]], y: [pos.earth[1]], text: ['Earth'], textposition: 'bottom center',
+                textfont: { color: C.ink, size: 12 }, marker: { color: C.accent, size: 13, line: { color: C.plotBg, width: 2 } },
+                hovertemplate: 'Earth<extra></extra>', showlegend: false });
+  return traces;
+}
+
+function helioLayout() {
+  const axis = { range: [-3.2, 3.2], gridcolor: C.grid, zeroline: false, linecolor: C.line, tickfont: { color: C.ink3, family: C.mono, size: 10 },
+                 ticksuffix: ' au', dtick: 1 };
+  return {
+    paper_bgcolor: C.surface, plot_bgcolor: C.plotBg, margin: { l: 50, r: 16, t: 16, b: 36 },
+    font: { family: C.font, color: C.ink2, size: 11 }, showlegend: false, dragmode: 'pan', uirevision: 'helio',
+    hoverlabel: { bgcolor: C.surface, bordercolor: C.line, font: { color: C.ink, family: C.font } },
+    xaxis: { ...axis }, yaxis: { ...axis, scaleanchor: 'x', scaleratio: 1 },
+  };
+}
+
+function renderPlot() {
+  computePositions(state.t);
+  const traces = state.view === 'near' ? nearTraces() : helioTraces();
+  const layout = state.view === 'near' ? nearLayout() : helioLayout();
+  const config = { displayModeBar: false, responsive: true, scrollZoom: state.view === 'helio', doubleClick: 'reset' };
+  if (!plotReady) {
+    Plotly.newPlot(plotEl, traces, layout, config).then(() => {
+      plotReady = true;
+      plotEl.on('plotly_click', ev => {
+        const p = ev.points && ev.points[0];
+        if (p && p.customdata != null && typeof p.customdata === 'number') { focus(p.customdata, { select: true }); }
+      });
+    });
+  } else {
+    Plotly.react(plotEl, traces, layout, config);
+  }
+}
+
+/* ------------------------------------------------------------------ text around the map */
+function renderClock() {
+  document.getElementById('when').textContent = fmtDateTime(state.t);
+  document.getElementById('when-rel').textContent = fmtRel(state.t);
+  const slider = document.getElementById('time');
+  slider.value = Math.round((state.t - META.t_min) * 24);
+  document.getElementById('view-note').textContent = state.view === 'near'
+    ? 'Earth at the centre, Sun always at the top. Distance grows ×10 per ring.'
+    : 'Top view of the inner solar system. Drag to pan, scroll to zoom, double-click to reset.';
+}
+
+function renderLegend() {
+  const bands = [['1 in 1,000 or more', 3], ['1 in 100,000 to 1 in 1,000', 2], ['1 in 10 million to 1 in 100,000', 1], ['below 1 in 10 million', 0]];
+  const el = document.getElementById('legend');
+  el.innerHTML = '<span class="eyebrow">Highest single impact chance:</span>' +
+    bands.map(([txt, b]) => `<span><i class="dot" style="background:${C.risk[b]}"></i>${txt}</span>`).join('') +
+    `<span><i class="dot" style="background:${C.removed}"></i>removed from list</span>` +
+    `<span>Selected objects get their own colour and a label. Dot size shows estimated diameter.</span>`;
+  document.getElementById('strip-legend').innerHTML =
+    `<span>Grey bars: how many objects have their most likely possible impact in each year</span>` +
+    `<span>Coloured ticks: every possible impact date of a selected object (tall tick = most likely)</span>` +
+    `<span>▲ JPL best-guess close pass under 0.05 au</span>`;
+}
+
+/* ------------------------------------------------------------------ timeline strip */
+const strip = document.getElementById('strip');
+const sctx = strip.getContext('2d');
+const PAD = 9;                          // matches the slider's thumb inset
+let yearCounts = null;
+function tToX(t, w) { return PAD + (t - META.t_min) / (META.t_max - META.t_min) * (w - 2 * PAD); }
+function xToT(x, w) { return META.t_min + (x - PAD) / (w - 2 * PAD) * (META.t_max - META.t_min); }
+
+function renderStrip() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = strip.clientWidth, h = strip.clientHeight;
+  if (strip.width !== Math.round(w * dpr)) { strip.width = Math.round(w * dpr); strip.height = Math.round(h * dpr); }
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  sctx.clearRect(0, 0, w, h);
+  const base = h - 18;
+
+  if (!yearCounts) {
+    yearCounts = new Map();
+    for (const o of SENTRY) if (o.inRange) { const y = tToDate(o.vi_t).getUTCFullYear(); yearCounts.set(y, (yearCounts.get(y) || 0) + 1); }
+  }
+  const maxC = Math.max(...yearCounts.values());
+  sctx.fillStyle = C.ink3; sctx.globalAlpha = 0.28;
+  for (const [y, c] of yearCounts) {
+    const x0 = tToX(dateToT(new Date(Date.UTC(y, 0, 1))), w), x1 = tToX(dateToT(new Date(Date.UTC(y + 1, 0, 1))), w);
+    const bh = (c / maxC) * (base - 30);
+    sctx.fillRect(x0 + 0.5, base - bh, Math.max(1, x1 - x0 - 1), bh);
+  }
+  sctx.globalAlpha = 1;
+
+  // year axis
+  sctx.strokeStyle = C.line; sctx.lineWidth = 1;
+  sctx.beginPath(); sctx.moveTo(PAD, base + 0.5); sctx.lineTo(w - PAD, base + 0.5); sctx.stroke();
+  sctx.fillStyle = C.ink3; sctx.font = `10px ${C.mono}`; sctx.textAlign = 'center'; sctx.textBaseline = 'top';
+  const every = w < 520 ? 20 : 10;
+  for (let y = 2000; y <= 2130; y += every) {
+    const x = tToX(dateToT(new Date(Date.UTC(y, 0, 1))), w);
+    sctx.fillRect(x, base, 1, 4);
+    sctx.fillText(String(y), Math.min(w - 16, Math.max(16, x)), base + 5);
+  }
+
+  // today
+  const xt = tToX(META.today_t, w);
+  sctx.strokeStyle = C.ink3; sctx.setLineDash([3, 3]);
+  sctx.beginPath(); sctx.moveTo(xt + 0.5, 12); sctx.lineTo(xt + 0.5, base); sctx.stroke(); sctx.setLineDash([]);
+  sctx.fillStyle = C.ink3; sctx.textAlign = 'left'; sctx.textBaseline = 'top'; sctx.font = `10px ${C.font}`;
+  sctx.fillText('today', xt + 3, 2);
+
+  // selected objects: possible impact dates and JPL close passes
+  for (const [k] of state.selected) {
+    const o = OBJ[k], col = colourOf(o);
+    sctx.fillStyle = col;
+    for (let i = 0; i < viObj.length; i++) if (viObj[i] === k) {
+      const x = tToX(viT[i], w); if (x < PAD || x > w - PAD) continue;
+      sctx.fillRect(x - 0.75, base - 14, 1.5, 14);
+    }
+    if (o.inRange && !o.featured) { const x = tToX(o.vi_t, w); sctx.fillRect(x - 1, base - 30, 2, 30); sctx.beginPath(); sctx.arc(x, base - 31, 3, 0, TWO_PI); sctx.fill(); }
+    const passes = [];
+    for (let i = 0; i < cadObj.length; i++) if (cadObj[i] === k) passes.push(cadT[i]);
+    if (o.featured) for (const a of o.approaches) passes.push(a.t);
+    for (const tp of passes) {
+      const x = tToX(tp, w);
+      sctx.beginPath(); sctx.moveTo(x, base + 1); sctx.lineTo(x - 4, base + 8); sctx.lineTo(x + 4, base + 8); sctx.closePath(); sctx.fill();
+    }
+  }
+
+  // current time cursor
+  const xc = tToX(state.t, w);
+  sctx.fillStyle = C.ink; sctx.fillRect(xc - 1, 8, 2, base - 8);
+}
+
+function stripPointer(ev) {
+  const r = strip.getBoundingClientRect();
+  setTime(xToT(ev.clientX - r.left, r.width));
+}
+strip.addEventListener('pointerdown', ev => { strip.setPointerCapture(ev.pointerId); stripPointer(ev); });
+strip.addEventListener('pointermove', ev => { if (ev.buttons) stripPointer(ev); });
+
+/* ------------------------------------------------------------------ detail card */
+function renderDetail() {
+  const el = document.getElementById('detail');
+  const k = state.focus;
+  if (k == null) {
+    el.innerHTML = '<p class="explain">Pick an object in the list, or click a dot on the map, to see its details here.</p>';
+    return;
+  }
+  const o = OBJ[k];
+  const col = colourOf(o);
+  const here = `${fmtLd(pos.r[k])} from Earth${pos.moonLd[k] < 20 ? `, ${fmtLd(pos.moonLd[k])} from the Moon` : ''}`;
+  const quality = o.U != null && o.U !== '' ? `${U_TEXT[+o.U] || 'unknown'} (JPL uncertainty code ${o.U} of 9)` : 'unknown';
+  const arc = o.arc_days != null ? (o.arc_days < 60 ? `${Math.round(o.arc_days)} days` : `${(o.arc_days / 365.25).toFixed(o.arc_days < 3650 ? 1 : 0)} years`) : 'unknown';
+  const sentryLink = `https://cneos.jpl.nasa.gov/sentry/details.html#?des=${encodeURIComponent(o.des)}`;
+  const sbdbLink = `https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(o.des)}`;
+  const jumpBtn = o.inRange ? `<button class="btn primary" type="button" id="detail-jump">Jump to ${o.jumpLabel}</button>` : '';
+  let body;
+  if (o.featured) {
+    const rows = o.approaches.map(a => `<div><dt>${a.body} close approach</dt><dd><span class="big">${a.date}</span><br>${fmtKm(a.dist_km)} from ${a.body === 'Earth' ? 'Earth’s centre' : 'the Moon’s centre'}</dd></div>`).join('');
+    body = `<p class="explain">Taken off Sentry’s impact-risk list on ${o.removed ? o.removed.slice(0, 10) : 'an earlier date'}: new observations ruled out every Earth impact for the next 100 years. It is shown here for comparison. The close approaches below are JPL’s predictions.</p>
+      <dl class="facts">${rows}
+        <div><dt>Right now on the map</dt><dd>${here}</dd></div>
+        <div><dt>Orbit known</dt><dd>${quality}; observed over ${arc}</dd></div></dl>`;
+  } else {
+    const cad = o.cad
+      ? `JPL’s best-guess orbit passes ${fmtLd(o.cad.ld)} from Earth on ${o.cad.date} UTC (could be ${o.cad.ld_min.toPrecision(2)} to ${o.cad.ld_max.toPrecision(2)} LD).`
+      : 'JPL’s best-guess orbit does not come within 0.05 au (19.5 LD) of Earth within a month of that date.';
+    const extra = o.inRange ? '' : ' This date is after 2130, outside this timeline.';
+    body = `<dl class="facts">
+        <div><dt>Most likely possible impact</dt><dd><span class="big">${o.vi_date ? o.vi_date.slice(0, 10) : '–'}</span><br>chance ${fmtPct(o.ip_max)} (${fmtOneIn(o.ip_max)})${extra}</dd></div>
+        <div><dt>All possible impacts</dt><dd>${o.n_imp} date${o.n_imp === 1 ? '' : 's'} in ${o.range}<br>total chance ${fmtPct(o.ip_cum)} (${fmtOneIn(o.ip_cum)})</dd></div>
+        <div><dt>Risk scales</dt><dd>Palermo ${o.ps_cum != null ? o.ps_cum.toFixed(2) : '–'} · Torino ${o.ts_max != null ? o.ts_max : '–'}</dd></div>
+        <div><dt>Size</dt><dd>${fmtSize(o.diam_km)} across (estimated from brightness, H = ${o.H != null ? o.H.toFixed(1) : '–'})</dd></div>
+        <div><dt>Right now on the map</dt><dd>${here}</dd></div>
+        <div><dt>Orbit known</dt><dd>${quality}; observed over ${arc}, last seen ${o.last_obs || '–'}</dd></div>
+      </dl>
+      <p class="explain">${cad} The possible impact comes from the uncertainty in the orbit: a small fraction of the orbits that still fit the observations would hit Earth. The dot on the map follows the single best-guess orbit${+o.U >= 7 ? ', which for this object is very uncertain' : ''}.</p>`;
+  }
+  el.innerHTML = `<div class="detail-head"><h2><i class="dot" style="background:${col}; width:14px; height:14px"></i>${o.label}</h2>
+      <div class="links">${jumpBtn}<a href="${sentryLink}" target="_blank" rel="noopener">JPL Sentry page</a><a href="${sbdbLink}" target="_blank" rel="noopener">JPL orbit page</a></div></div>${body}`;
+  const jb = document.getElementById('detail-jump');
+  if (jb) jb.addEventListener('click', () => jumpTo(k));
+}
+
+/* ------------------------------------------------------------------ object list */
+const listEl = document.getElementById('list');
+const rows = new Array(N);
+function buildRow(o) {
+  const row = document.createElement('div');
+  row.className = 'row'; row.setAttribute('role', 'listitem');
+  const id = `sel-${o.k}`;
+  const pct = o.featured ? 'ruled out' : fmtPct(o.ip_max);
+  const dateText = o.jumpLabel ? (o.inRange ? `${o.jumpLabel.slice(0, 10)} ›` : `${o.jumpLabel.slice(0, 10)}`) : '–';
+  row.innerHTML = `<input type="checkbox" id="${id}" aria-label="Select ${o.label}">
+    <span class="swatch"></span>
+    <button class="name" type="button" title="${o.name}">${o.label}</button>
+    <span class="pct" title="${o.featured ? 'Removed from the risk list' : fmtOneIn(o.ip_max)}">${pct}</span>
+    <button class="jump" type="button" ${o.inRange ? '' : 'disabled'} title="${o.inRange ? 'Jump the timeline to this date' : 'After 2130, outside this timeline'}">${dateText}</button>`;
+  row.querySelector('input').addEventListener('change', ev => { select(o.k, ev.target.checked); if (ev.target.checked) state.focus = o.k; refresh(); });
+  row.querySelector('.name').addEventListener('click', () => focus(o.k));
+  row.querySelector('.jump').addEventListener('click', () => jumpTo(o.k));
+  rows[o.k] = row;
+  return row;
+}
+const featuredLabel = document.createElement('div');
+featuredLabel.className = 'group-label'; featuredLabel.textContent = 'Removed from the list, shown for comparison';
+const sentryLabel = document.createElement('div');
+sentryLabel.className = 'group-label'; sentryLabel.textContent = 'On the Sentry risk list';
+const emptyEl = document.createElement('p');
+emptyEl.className = 'empty'; emptyEl.textContent = 'No objects match that search.';
+OBJ.forEach(buildRow);
+
+const SORTS = {
+  ip: (a, b) => (b.ip_max || 0) - (a.ip_max || 0),
+  date: (a, b) => (a.vi_t ?? 1e9) - (b.vi_t ?? 1e9),
+  ps: (a, b) => (b.ps_cum ?? -99) - (a.ps_cum ?? -99),
+  size: (a, b) => (b.diam_km || 0) - (a.diam_km || 0),
+  name: (a, b) => a.label.localeCompare(b.label, 'en', { numeric: true }),
+};
+function renderList() {
+  const q = document.getElementById('search').value.toLowerCase().replace(/\s+/g, '');
+  const sort = SORTS[document.getElementById('sort').value];
+  const match = o => !q || o.search.includes(q);
+  const f = FEATURED.filter(match), s = SENTRY.filter(match).sort(sort);
+  const frag = document.createDocumentFragment();
+  if (f.length) { frag.appendChild(featuredLabel); f.forEach(o => frag.appendChild(rows[o.k])); }
+  if (s.length) { frag.appendChild(sentryLabel); s.forEach(o => frag.appendChild(rows[o.k])); }
+  if (!f.length && !s.length) frag.appendChild(emptyEl);
+  listEl.replaceChildren(frag);
+  updateRows();
+}
+function updateRows() {
+  for (const o of OBJ) {
+    const row = rows[o.k], sel = state.selected.has(o.k);
+    row.classList.toggle('sel', sel);
+    row.classList.toggle('focused', state.focus === o.k);
+    row.querySelector('input').checked = sel;
+    row.querySelector('.swatch').style.background = colourOf(o);
+  }
+  document.getElementById('count').textContent =
+    `${SENTRY.length.toLocaleString('en-US')} on the list · ${state.selected.size} selected`;
+}
+
+/* ------------------------------------------------------------------ notes */
+function renderNotes() {
+  const c = META.check;
+  document.getElementById('notes').innerHTML = `
+    <section><h3>What you are looking at</h3>
+      <p>Each dot is an asteroid on NASA/JPL’s Sentry list: objects whose orbits are not yet known well enough to rule out hitting Earth in the next 100 years. The dot follows each asteroid’s <em>best-guess</em> orbit. Sentry’s possible impacts come from the range of orbits that still fit the observations, so on a possible impact date the best-guess dot is usually <em>not</em> at Earth.</p>
+      <p>Near Earth view: distance from Earth is true 3-D distance on a log scale; direction is the asteroid’s direction around Earth seen from above the plane of Earth’s orbit, turned so the Sun is always at the top.</p></section>
+    <section><h3>How positions are calculated</h3>
+      <p>A gravity simulation (REBOUND, with the Sun, eight planets and the Moon) moves every asteroid from its JPL orbit to 2000 and to 2130. The path is stored as ${META.n_segments.toLocaleString('en-US')} short orbit pieces that match the simulation to within 2% of the distance to Earth or the Moon. Earth and Moon come from JPL’s DE440 ephemeris.</p>
+      <p>Check against JPL: for ${c.n.toLocaleString('en-US')} close approaches JPL predicts for these objects (2000–2130, under 0.05 au), this model’s distance has a median error of ${c.median_pct.toFixed(c.median_pct < 1 ? 2 : 1)}%; ${Math.round(c.within5_pct)}% are within 5% and ${Math.round(c.within20_pct)}% within 20%. Close passes after another close encounter decades ahead are the hardest to match.</p></section>
+    <section><h3>Data sources</h3>
+      <ul>
+        <li><a href="https://ssd-api.jpl.nasa.gov/doc/sentry.html" target="_blank" rel="noopener">JPL CNEOS Sentry API</a>: risk list, every possible impact, removed objects</li>
+        <li><a href="https://ssd-api.jpl.nasa.gov/doc/sbdb_query.html" target="_blank" rel="noopener">JPL Small-Body Database Query API</a>: orbits</li>
+        <li><a href="https://ssd-api.jpl.nasa.gov/doc/cad.html" target="_blank" rel="noopener">JPL Close-Approach Data API</a>: JPL’s predicted close passes</li>
+        <li><a href="https://ssd.jpl.nasa.gov/planets/eph_export.html" target="_blank" rel="noopener">JPL DE440s ephemeris</a>: Sun, planets and Moon</li>
+      </ul>
+      <p>Data downloaded and page built ${META.built}. Times are UTC to within about a minute. LD = lunar distance, 384,400 km.</p></section>`;
+}
+
+/* ------------------------------------------------------------------ actions */
+function setTime(t) {
+  state.t = Math.min(META.t_max, Math.max(META.t_min, t));
+  scheduleRender();
+}
+function focus(k, opts = {}) {
+  if (opts.select) select(k, true);
+  state.focus = k;
+  refresh();
+  const row = rows[k];
+  if (row && row.isConnected && opts.scroll !== false) {
+    const lr = listEl.getBoundingClientRect(), rr = row.getBoundingClientRect();
+    if (rr.top < lr.top || rr.bottom > lr.bottom) listEl.scrollTop += rr.top - lr.top - lr.height / 3;
+  }
+}
+function jumpTo(k) {
+  const o = OBJ[k];
+  if (!o.inRange) return;
+  stop();
+  select(k, true);
+  state.focus = k;
+  state.t = o.jumpT;
+  refresh();
+}
+function refresh() { updateRows(); scheduleRender(); }
+
+let pending = false;
+function scheduleRender() {
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(() => {
+    pending = false;
+    renderPlot(); renderClock(); renderStrip(); renderDetail();
+  });
+}
+
+let last = null;
+function tick(now) {
+  if (!state.playing) return;
+  if (last != null) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    state.t += dt * state.rate;
+    if (state.t >= META.t_max) { state.t = META.t_max; stop(); }
+    scheduleRender();
+  }
+  last = now;
+  requestAnimationFrame(tick);
+}
+function play() { state.playing = true; last = null; document.getElementById('play').textContent = '❚❚ Pause'; requestAnimationFrame(tick); }
+function stop() { state.playing = false; document.getElementById('play').textContent = '▶ Play'; }
+
+/* ------------------------------------------------------------------ wire up controls */
+const slider = document.getElementById('time');
+slider.max = Math.round((META.t_max - META.t_min) * 24);
+slider.addEventListener('input', () => setTime(META.t_min + slider.value / 24));
+document.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => setTime(state.t + Number(b.dataset.step))));
+document.getElementById('play').addEventListener('click', () => (state.playing ? stop() : play()));
+document.getElementById('speed').addEventListener('change', ev => { state.rate = Number(ev.target.value); });
+document.getElementById('today').addEventListener('click', () => setTime(META.today_t));
+document.getElementById('date-input').addEventListener('change', ev => {
+  if (ev.target.value) setTime(dateToT(new Date(ev.target.value + 'T00:00:00Z')));
+});
+for (const [id, view] of [['view-near', 'near'], ['view-helio', 'helio']]) {
+  document.getElementById(id).addEventListener('click', () => {
+    state.view = view;
+    document.getElementById('view-near').setAttribute('aria-pressed', String(view === 'near'));
+    document.getElementById('view-helio').setAttribute('aria-pressed', String(view === 'helio'));
+    Plotly.purge(plotEl); plotReady = false;
+    scheduleRender();
+  });
+}
+document.getElementById('search').addEventListener('input', renderList);
+document.getElementById('sort').addEventListener('change', renderList);
+document.getElementById('only-selected').addEventListener('change', ev => { state.onlySelected = ev.target.checked; scheduleRender(); });
+document.getElementById('clear').addEventListener('click', () => { state.selected.clear(); refresh(); });
+
+function onTheme() { readColours(); renderLegend(); updateRows(); Plotly.purge(plotEl); plotReady = false; scheduleRender(); }
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', onTheme);
+new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+window.addEventListener('resize', () => renderStrip());
+
+/* ------------------------------------------------------------------ start: a realistic first view */
+readColours();
+const byChance = SENTRY.slice().sort(SORTS.ip);
+const yr4 = OBJ.find(o => o.des === '2024 YR4');
+for (const o of [byChance[0], byChance[1], yr4]) if (o) select(o.k, true);
+state.focus = byChance[0] ? byChance[0].k : null;
+renderLegend();
+renderNotes();
+renderList();
+scheduleRender();
+})();
+</script>
