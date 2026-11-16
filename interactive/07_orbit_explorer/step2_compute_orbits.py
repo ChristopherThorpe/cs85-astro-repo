@@ -24,7 +24,7 @@ so. Sentry's possible impacts come from that uncertainty, not from the best gues
 
 Run from the repository root (takes several minutes):
     python3 interactive/07_orbit_explorer/step2_compute_orbits.py
-Output: data/07_explorer/segments.npz
+Output: data/07_explorer/segments_sim.npz
 """
 from pathlib import Path
 import json
@@ -321,6 +321,6 @@ if __name__ == '__main__':
     elements = seg[:, 3:].copy()
     n = np.sqrt(MU_SUN / elements[:, 0]**3)
     elements[:, 5] = np.mod(elements[:, 5] + n * (lo - anchor), 2 * np.pi)
-    np.savez_compressed(DATA / 'segments.npz', des=np.array(des), obj=obj, t_start=lo,
+    np.savez_compressed(DATA / 'segments_sim.npz', des=np.array(des), obj=obj, t_start=lo,
                         elements=elements, jd0=JD0, jd_start=JD_START, jd_end=JD_END)
-    print(f'Saved {len(seg)} segments to {DATA / "segments.npz"}')
+    print(f'Saved {len(seg)} segments to {DATA / "segments_sim.npz"}')

@@ -6,18 +6,19 @@ Step 3 of 3 for the Orbit Explorer: check the orbits against JPL and build the w
      close approaches.
   2. Work out Earth's and the Moon's positions for every day from JPL's DE440s.
   3. CHECK our orbits: for every close approach JPL predicts for these asteroids
-     (2000 to 2130, closer than 0.05 au), compute the distance from our model and
-     compare. The result is printed and shown on the page.
+     (2000 to 2130, closer than 0.05 au), compute the distance from our simulation
+     and compare. Objects that use JPL's own path (step 2b) are left out of this
+     check, since they would match by construction. The result is shown on the page.
   4. Pack all of that into orbit_explorer.html (template.html + the data).
 
-Run from the repository root after steps 1 and 2:
+Run from the repository root after steps 1, 2 and 2b:
     python3 interactive/07_orbit_explorer/step3_build_page.py
 """
 from pathlib import Path
 import base64
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -62,16 +63,19 @@ def table(reply):
 
 
 def num(x, default=None):
+    """Text -> number; missing or 'nan' values become None (empty in the page)."""
     try:
-        return float(x)
+        value = float(x)
     except (TypeError, ValueError):
         return default
+    return value if np.isfinite(value) else default
 
 
 # ---------------------------------------------------------------- orbits (same maths as the page)
 class Orbits:
-    def __init__(self):
-        z = np.load(DATA / 'segments.npz')
+    def __init__(self, filename='segments.npz'):
+        z = np.load(DATA / filename)
+        self.jpl_tracks = [str(d) for d in z['jpl_tracks']] if 'jpl_tracks' in z else []
         self.des = [str(d) for d in z['des']]
         self.obj = z['obj']
         self.t = z['t_start'].astype(np.float32)          # stored as 32-bit floats on the page
@@ -154,7 +158,7 @@ def main():
     objects = []
     for k, d in enumerate(des):
         o = sbdb.get(d, {})
-        rec = {'des': d, 'name': (o.get('full_name') or d).strip(),
+        rec = {'des': d, 'name': (o.get('full_name') or d).strip(), 'jpl_track': d in orbits.jpl_tracks,
                'H': num(o.get('H')), 'U': o.get('condition_code'),
                'arc_days': num(o.get('data_arc'))}
         if d in summary:
@@ -193,9 +197,10 @@ def main():
     moon_ld = moon * AU_KM / LD_KM
 
     # --- the check against JPL
-    print(f'Checking {len(cad_rows)} JPL close approaches against our model ...')
+    simulated = np.array([des[k] not in orbits.jpl_tracks for k in cad_obj])
+    print(f'Checking {simulated.sum()} JPL close approaches against our simulation ...')
     check = []
-    for k, jd, ld in zip(cad_obj, cad_jd, cad_ld):
+    for k, jd, ld in zip(cad_obj[simulated], cad_jd[simulated], cad_ld[simulated]):
         d, best = closest_approach(orbits, k, jd)
         check.append((ld, d * AU_KM / LD_KM, (best - jd) * 24, (jd - 2461200.5) / 365.25))
     check = np.array(check)
@@ -206,6 +211,7 @@ def main():
         'within5_pct': float(np.mean(rel < 0.05) * 100),
         'within20_pct': float(np.mean(rel < 0.20) * 100),
         'median_hours': float(np.median(np.abs(check[:, 2]))),
+        'n_jpl_tracks': len(orbits.jpl_tracks),
     }
     print(f"  median distance error {stats['median_pct']:.2f}%, "
           f"{stats['within5_pct']:.0f}% within 5%, {stats['within20_pct']:.0f}% within 20%, "
@@ -226,7 +232,6 @@ def main():
         'meta': {
             'jd0': JD0, 't_min': t_min, 't_max': t_max, 'mu_sun': MU_SUN,
             'au_km': AU_KM, 'ld_km': LD_KM,
-            'today_t': float(jd_from_date(date.today().isoformat() + '.5') - JD0),
             'built': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
             'check': stats, 'n_segments': int(len(orbits.t)),
         },
@@ -239,7 +244,7 @@ def main():
         'vi': {'obj': b64(vi_obj, '<u2'), 't': b64(vi_jd - JD0, '<f4'), 'ip': b64(vi_ip, '<f4')},
         'cad': {'obj': b64(cad_obj, '<u2'), 't': b64(cad_jd - JD0, '<f4'), 'ld': b64(cad_ld, '<f4')},
     }
-    payload = json.dumps(data, separators=(',', ':')).replace('</', '<\\/')
+    payload = json.dumps(data, separators=(',', ':'), allow_nan=False).replace('</', '<\\/')
     page = (HERE / 'template.html').read_text().replace('/*__EXPLORER_DATA__*/', payload)
     OUT_FRAGMENT.write_text(page)
     OUT_HTML.write_text('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'

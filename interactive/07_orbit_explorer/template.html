@@ -86,7 +86,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .plot-wrap { position: relative; padding: 4px; }
 #plot { width: 100%; height: min(74vh, 760px); min-height: 340px; }
-.view-note { position: absolute; left: 14px; top: 10px; font-size: 0.78rem; color: var(--ink-3); max-width: 24ch; pointer-events: none; }
+.view-note { flex-basis: 100%; color: var(--ink-3); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 12px 10px; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--ink-2); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
@@ -182,7 +182,6 @@ input[type="range"]#time { width: 100%; margin: 0; accent-color: var(--accent); 
       </div>
       <div class="plot-wrap">
         <div id="plot" role="img" aria-label="Map of asteroid positions"></div>
-        <p class="view-note" id="view-note"></p>
       </div>
       <div class="legend" id="legend"></div>
     </div>
@@ -280,6 +279,7 @@ const TWO_PI = 2 * Math.PI;
 const DEG = 180 / Math.PI;
 const RMIN = 0.03, RMAX = 2500;         // map range in lunar distances (log scale)
 const HOUR = 1 / 24;
+META.today_t = (Date.now() / 86400000) + 2440587.5 - META.jd0;   // the viewer's clock
 
 /* ------------------------------------------------------------------ orbit maths */
 // Each asteroid's path is a chain of Kepler ellipses ("segments"), computed in step 2
@@ -369,13 +369,22 @@ function fmtSize(km) {
   const m = km * 1000;
   return m < 1000 ? `about ${m < 20 ? m.toFixed(0) : Math.round(m / 5) * 5} m` : `about ${km.toPrecision(2)} km`;
 }
-function shortName(o) { return o.name.replace(/^\((.*)\)$/, '$1'); }
+function shortName(o) {
+  // '(2010 RF12)' -> '2010 RF12';  '101955 Bennu (1999 RQ36)' -> '101955 Bennu';  '29075 (1950 DA)' stays
+  const n = o.name.trim();
+  if (/^\(.*\)$/.test(n)) return n.slice(1, -1);
+  const named = n.match(/^(\d+ [^(]*[A-Za-z][^(]*?)\s*\(.*\)$/);
+  return named ? named[1] : n;
+}
 function fmtRel(t) {
   const d = t - META.today_t, a = Math.abs(d);
-  if (a < 1) return a < HOUR ? 'now' : `${Math.round(a * 24)} hours ${d < 0 ? 'ago' : 'from now'}`;
-  if (a < 60) return `${Math.round(a)} days ${d < 0 ? 'ago' : 'from now'}`;
-  if (a < 730) return `${Math.round(a / 30.4375)} months ${d < 0 ? 'ago' : 'from now'}`;
-  return `${(a / 365.25).toFixed(1)} years ${d < 0 ? 'ago' : 'from now'}`;
+  const when = d < 0 ? 'ago' : 'from now';
+  const plural = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'} ${when}`;
+  if (a < HOUR) return 'now';
+  if (a < 1) return plural(Math.round(a * 24), 'hour');
+  if (a < 60) return plural(Math.round(a), 'day');
+  if (a < 730) return plural(Math.round(a / 30.4375), 'month');
+  return `${(a / 365.25).toFixed(1)} years ${when}`;
 }
 const U_TEXT = ['very well known', 'very well known', 'well known', 'well known', 'fairly well known',
                 'uncertain', 'uncertain', 'very uncertain', 'very uncertain', 'extremely uncertain'];
@@ -389,7 +398,7 @@ OBJ.forEach((o, k) => {
     o.band = 'removed';
     const best = (o.approaches || []).slice().sort((a, b) => a.dist_km - b.dist_km)[0];
     o.jumpT = best ? best.t : null;
-    o.jumpLabel = best ? best.date.slice(0, 11) : '';
+    o.jumpLabel = best ? fmtDate(best.t) : '';
   } else {
     const p = o.ip_max || 0;
     o.band = p >= 1e-3 ? 3 : p >= 1e-5 ? 2 : p >= 1e-7 ? 1 : 0;
@@ -494,8 +503,6 @@ function nearTraces() {
   traces.push({ type: 'scatterpolar', mode: 'text', r: RINGS.map(g => g.r), theta: RINGS.map(() => 212),
                 text: RINGS.map(g => g.label), textposition: 'bottom center', hoverinfo: 'skip', showlegend: false,
                 textfont: { color: C.ink3, size: 10, family: C.font } });
-  traces.push({ type: 'scatterpolar', mode: 'text', r: [RMAX * 0.55], theta: [0], text: ['↑ toward the Sun'],
-                textposition: 'middle center', hoverinfo: 'skip', showlegend: false, textfont: { color: C.sun, size: 11, family: C.font } });
 
   // all (unselected) objects as one fast WebGL layer
   const pop = visibleObjects().filter(o => !state.selected.has(o.k));
@@ -544,8 +551,10 @@ function nearTraces() {
 
 function nearLayout() {
   return {
-    paper_bgcolor: C.surface, plot_bgcolor: C.surface, margin: { l: 20, r: 20, t: 20, b: 20 },
+    paper_bgcolor: C.surface, plot_bgcolor: C.surface, margin: { l: 20, r: 20, t: 34, b: 14 },
     font: { family: C.font, color: C.ink2, size: 11 }, showlegend: false, dragmode: false,
+    annotations: [{ text: '↑ Sun', x: 0.5, y: 1, xref: 'paper', yref: 'paper', yanchor: 'bottom', showarrow: false,
+                    font: { color: C.sun, size: 12, family: C.font } }],
     uirevision: 'near', hoverlabel: { bgcolor: C.surface, bordercolor: C.line, font: { color: C.ink, family: C.font } },
     polar: {
       bgcolor: C.plotBg,
@@ -629,15 +638,16 @@ function renderClock() {
   document.getElementById('when-rel').textContent = fmtRel(state.t);
   const slider = document.getElementById('time');
   slider.value = Math.round((state.t - META.t_min) * 24);
-  document.getElementById('view-note').textContent = state.view === 'near'
-    ? 'Earth at the centre, Sun always at the top. Distance grows ×10 per ring.'
-    : 'Top view of the inner solar system. Drag to pan, scroll to zoom, double-click to reset.';
+  const note = document.getElementById('view-note');
+  if (note) note.textContent = state.view === 'near'
+    ? 'Earth is at the centre and the Sun is always at the top. Each ring is 10× farther than the one inside it (LD = lunar distance, 384,400 km).'
+    : 'Top view of the inner solar system, looking down on the plane of Earth’s orbit. Drag to pan, scroll to zoom, double-click to reset.';
 }
 
 function renderLegend() {
   const bands = [['1 in 1,000 or more', 3], ['1 in 100,000 to 1 in 1,000', 2], ['1 in 10 million to 1 in 100,000', 1], ['below 1 in 10 million', 0]];
   const el = document.getElementById('legend');
-  el.innerHTML = '<span class="eyebrow">Highest single impact chance:</span>' +
+  el.innerHTML = '<span class="view-note" id="view-note"></span><span class="eyebrow">Highest single impact chance:</span>' +
     bands.map(([txt, b]) => `<span><i class="dot" style="background:${C.risk[b]}"></i>${txt}</span>`).join('') +
     `<span><i class="dot" style="background:${C.removed}"></i>removed from list</span>` +
     `<span>Selected objects get their own colour and a label. Dot size shows estimated diameter.</span>`;
@@ -739,6 +749,7 @@ function renderDetail() {
   const arc = o.arc_days != null ? (o.arc_days < 60 ? `${Math.round(o.arc_days)} days` : `${(o.arc_days / 365.25).toFixed(o.arc_days < 3650 ? 1 : 0)} years`) : 'unknown';
   const sentryLink = `https://cneos.jpl.nasa.gov/sentry/details.html#?des=${encodeURIComponent(o.des)}`;
   const sbdbLink = `https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(o.des)}`;
+  const source = o.jpl_track ? 'JPL Horizons (best-guess orbit)' : 'this page’s gravity simulation of the best-guess orbit';
   const jumpBtn = o.inRange ? `<button class="btn primary" type="button" id="detail-jump">Jump to ${o.jumpLabel}</button>` : '';
   let body;
   if (o.featured) {
@@ -746,7 +757,8 @@ function renderDetail() {
     body = `<p class="explain">Taken off Sentry’s impact-risk list on ${o.removed ? o.removed.slice(0, 10) : 'an earlier date'}: new observations ruled out every Earth impact for the next 100 years. It is shown here for comparison. The close approaches below are JPL’s predictions.</p>
       <dl class="facts">${rows}
         <div><dt>Right now on the map</dt><dd>${here}</dd></div>
-        <div><dt>Orbit known</dt><dd>${quality}; observed over ${arc}</dd></div></dl>`;
+        <div><dt>Orbit known</dt><dd>${quality}; observed over ${arc}</dd></div>
+        <div><dt>Path on the map</dt><dd>${source}</dd></div></dl>`;
   } else {
     const cad = o.cad
       ? `JPL’s best-guess orbit passes ${fmtLd(o.cad.ld)} from Earth on ${o.cad.date} UTC (could be ${o.cad.ld_min.toPrecision(2)} to ${o.cad.ld_max.toPrecision(2)} LD).`
@@ -759,6 +771,7 @@ function renderDetail() {
         <div><dt>Size</dt><dd>${fmtSize(o.diam_km)} across (estimated from brightness, H = ${o.H != null ? o.H.toFixed(1) : '–'})</dd></div>
         <div><dt>Right now on the map</dt><dd>${here}</dd></div>
         <div><dt>Orbit known</dt><dd>${quality}; observed over ${arc}, last seen ${o.last_obs || '–'}</dd></div>
+        <div><dt>Path on the map</dt><dd>${source}</dd></div>
       </dl>
       <p class="explain">${cad} The possible impact comes from the uncertainty in the orbit: a small fraction of the orbits that still fit the observations would hit Earth. The dot on the map follows the single best-guess orbit${+o.U >= 7 ? ', which for this object is very uncertain' : ''}.</p>`;
   }
@@ -828,6 +841,7 @@ function updateRows() {
 }
 
 /* ------------------------------------------------------------------ notes */
+function share(v) { return v >= 100 ? '100%' : v > 99 ? 'over 99%' : `${Math.round(v)}%`; }
 function renderNotes() {
   const c = META.check;
   document.getElementById('notes').innerHTML = `
@@ -836,13 +850,15 @@ function renderNotes() {
       <p>Near Earth view: distance from Earth is true 3-D distance on a log scale; direction is the asteroid’s direction around Earth seen from above the plane of Earth’s orbit, turned so the Sun is always at the top.</p></section>
     <section><h3>How positions are calculated</h3>
       <p>A gravity simulation (REBOUND, with the Sun, eight planets and the Moon) moves every asteroid from its JPL orbit to 2000 and to 2130. The path is stored as ${META.n_segments.toLocaleString('en-US')} short orbit pieces that match the simulation to within 2% of the distance to Earth or the Moon. Earth and Moon come from JPL’s DE440 ephemeris.</p>
-      <p>Check against JPL: for ${c.n.toLocaleString('en-US')} close approaches JPL predicts for these objects (2000–2130, under 0.05 au), this model’s distance has a median error of ${c.median_pct.toFixed(c.median_pct < 1 ? 2 : 1)}%; ${Math.round(c.within5_pct)}% are within 5% and ${Math.round(c.within20_pct)}% within 20%. Close passes after another close encounter decades ahead are the hardest to match.</p></section>
+      <p>Check against JPL: for ${c.n.toLocaleString('en-US')} close approaches JPL predicts for these objects (2000–2130, under 0.05 au), the simulation’s distance has a median error of ${c.median_pct.toFixed(c.median_pct < 1 ? 2 : 1)}%; ${share(c.within5_pct)} are within 5% and ${share(c.within20_pct)} within 20%.</p>
+      <p>For ${c.n_jpl_tracks || 'a few'} objects, including the two featured ones, the simulation could not follow JPL’s path: mostly after very close flybys, where tiny differences grow, and for two “mini-moons” that orbited Earth for a while. Those objects use positions from JPL Horizons instead and are left out of the check above.</p></section>
     <section><h3>Data sources</h3>
       <ul>
         <li><a href="https://ssd-api.jpl.nasa.gov/doc/sentry.html" target="_blank" rel="noopener">JPL CNEOS Sentry API</a>: risk list, every possible impact, removed objects</li>
         <li><a href="https://ssd-api.jpl.nasa.gov/doc/sbdb_query.html" target="_blank" rel="noopener">JPL Small-Body Database Query API</a>: orbits</li>
         <li><a href="https://ssd-api.jpl.nasa.gov/doc/cad.html" target="_blank" rel="noopener">JPL Close-Approach Data API</a>: JPL’s predicted close passes</li>
         <li><a href="https://ssd.jpl.nasa.gov/planets/eph_export.html" target="_blank" rel="noopener">JPL DE440s ephemeris</a>: Sun, planets and Moon</li>
+        <li><a href="https://ssd-api.jpl.nasa.gov/doc/horizons.html" target="_blank" rel="noopener">JPL Horizons API</a>: paths for the objects listed above</li>
       </ul>
       <p>Data downloaded and page built ${META.built}. Times are UTC to within about a minute. LD = lunar distance, 384,400 km.</p></section>`;
 }
